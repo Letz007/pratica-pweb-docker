@@ -34,7 +34,7 @@ services:
     volumes:
       - postgres_pweb_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d todolist"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -79,9 +79,6 @@ services:
   frontend-pweb:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        - VITE_API_BASE_URL=http://localhost:3000
     container_name: frontend-pweb
     ports:
       - "80:80"
@@ -101,4 +98,5 @@ networks:
 volumes:
   postgres_pweb_data:
   redisdata:
+
 
