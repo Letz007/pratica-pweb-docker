@@ -4,12 +4,13 @@ import dotenv from "dotenv";
 import bd from "./src/models/index.js";
 import redis from "./src/config/redis.js";
 
-
 dotenv.config();
 
 const { Task } = bd;
 
-// Testa a conexão com o banco de dados
+//
+// 🔹 Testa conexão com o banco
+//
 try {
   await bd.sequelize.authenticate();
   console.log("Conexão com o banco de dados estabelecida com sucesso.");
@@ -24,15 +25,21 @@ const port = 3000;
 app.use(express.json());
 app.use(cors());
 
+//
+// 🔹 Rota inicial
+//
 app.get("/", (req, res) => {
   res.json({ message: "Hello World" });
 });
 
+//
+// 🔹 GET /tasks — com cache Redis
+//
 app.get("/tasks", async (req, res) => {
   try {
     const cacheKey = "tasks:all";
 
-    // 🔵 1 — Busca no cache
+    // 1 — Tenta usar cache
     const cached = await redis.get(cacheKey);
 
     if (cached) {
@@ -40,11 +47,12 @@ app.get("/tasks", async (req, res) => {
       return res.json(JSON.parse(cached));
     }
 
-    // 🔴 2 — Cache MISS → busca no DB
     console.log("CACHE MISS");
+
+    // 2 — Busca no banco
     const tasks = await Task.findAll();
 
-    // 🟢 3 — Salva no cache (expira em 60s)
+    // 3 — Guarda no cache por 60s
     await redis.set(cacheKey, JSON.stringify(tasks), "EX", 60);
 
     return res.json(tasks);
@@ -56,34 +64,87 @@ app.get("/tasks", async (req, res) => {
 });
 
 
+//
+// 🔹 POST /tasks — cria tarefa + limpa cache
+//
 app.post("/tasks", async (req, res) => {
-  const { description } = req.body;
-  if (!description) return res.status(400).json({ error: "Descrição obrigatória" });
-  const task = await Task.create({ description, completed: false });
-  res.status(201).json(task);
+  try {
+    const { description } = req.body;
+
+    if (!description)
+      return res.status(400).json({ error: "Descrição obrigatória" });
+
+    const task = await Task.create({ description, completed: false });
+
+    // Limpa cache após alteração
+    await redis.del("tasks:all");
+
+    return res.status(201).json(task);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erro ao criar tarefa" });
+  }
 });
 
+
+//
+// 🔹 GET /tasks/:id
+//
 app.get("/tasks/:id", async (req, res) => {
   const task = await Task.findByPk(req.params.id);
   if (!task) return res.status(404).json({ error: "Tarefa não encontrada" });
   res.json(task);
 });
 
+
+//
+// 🔹 PUT /tasks/:id — edita + limpa cache
+//
 app.put("/tasks/:id", async (req, res) => {
-  const { description, completed } = req.body;
-  const task = await Task.findByPk(req.params.id);
-  if (!task) return res.status(404).json({ error: "Tarefa não encontrada" });
-  await task.update({ description, completed });
-  res.json(task);
+  try {
+    const { description, completed } = req.body;
+    const task = await Task.findByPk(req.params.id);
+
+    if (!task) return res.status(404).json({ error: "Tarefa não encontrada" });
+
+    await task.update({ description, completed });
+
+    // Limpa cache porque os dados mudaram
+    await redis.del("tasks:all");
+
+    res.json(task);
+
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao atualizar tarefa" });
+  }
 });
 
+
+//
+// 🔹 DELETE /tasks/:id — remove + limpa cache
+//
 app.delete("/tasks/:id", async (req, res) => {
-  const deleted = await Task.destroy({ where: { id: req.params.id } });
-  if (!deleted) return res.status(404).json({ error: "Tarefa não encontrada" });
-  res.status(204).send();
+  try {
+    const deleted = await Task.destroy({ where: { id: req.params.id } });
+
+    if (!deleted) return res.status(404).json({ error: "Tarefa não encontrada" });
+
+    // Limpa cache
+    await redis.del("tasks:all");
+
+    res.status(204).send();
+
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao deletar tarefa" });
+  }
 });
 
-app.listen(port, '0.0.0.0', () => {
+
+//
+// 🔹 Inicialização do servidor
+//
+app.listen(port, "0.0.0.0", () => {
   console.log(`Server is running on port ${port}`);
   console.log(`Database is running on port ${process.env.DB_PORT}`);
 });

@@ -1,31 +1,28 @@
-# Use a imagem oficial do Node.js como base
 FROM node:18-alpine
 
-# Instala o bash e postgresql-client para executar scripts e comandos SQL
+# Instala bash e cliente do PostgreSQL
 RUN apk add --no-cache bash postgresql-client
 
-# Define o diretório de trabalho dentro do container
+# Diretório de trabalho
 WORKDIR /app
 
-# Copia os arquivos de dependências
+# Copia pacotes
 COPY package*.json ./
 
-# Instala as dependências (incluindo devDependencies para sequelize-cli)
+# Instala dependências (inclui sequelize-cli caso esteja em dependencies)
 RUN npm ci
 
-# Copia o código fonte da aplicação
+# Copia código fonte
 COPY . .
 
-# Torna o script executável
+# Torna script de inicialização executável
 RUN chmod +x start.sh
 
-# Expõe a porta que a aplicação usa
+# Exposição da porta
 EXPOSE 3000
 
-# Define variáveis de ambiente padrão
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Comando para iniciar a aplicação (executa migrations e inicia servidor)
 CMD ["./start.sh"]
 
