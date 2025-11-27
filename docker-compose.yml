@@ -1,7 +1,27 @@
 version: '3.8'
 
 services:
-  # Banco de dados PostgreSQL
+  # -------------------------
+  # Redis
+  # -------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - todo-pweb-network
+
+  # -------------------------
+  # PostgreSQL
+  # -------------------------
   db-pweb:
     image: postgres:15-alpine
     container_name: db-pweb
@@ -13,16 +33,18 @@ services:
       - "5434:5432"
     volumes:
       - postgres_pweb_data:/var/lib/postgresql/data
-    networks:
-      - todo-pweb-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
+    networks:
+      - todo-pweb-network
 
+  # -------------------------
   # Backend API
+  # -------------------------
   backend-pweb:
     build:
       context: ./backend
@@ -31,21 +53,29 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+
       DB_HOST: db-pweb
       DB_PORT: 5432
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_NAME: todolist
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     ports:
       - "3000:3000"
     depends_on:
       db-pweb:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - todo-pweb-network
     restart: unless-stopped
 
-  # Frontend (Build e serve com Nginx)
+  # -------------------------
+  # Frontend (Nginx)
+  # -------------------------
   frontend-pweb:
     build:
       context: ./frontend
@@ -61,9 +91,14 @@ services:
       - todo-pweb-network
     restart: unless-stopped
 
+# -------------------------
+# Networks & Volumes
+# -------------------------
 networks:
   todo-pweb-network:
     driver: bridge
 
 volumes:
   postgres_pweb_data:
+  redisdata:
+

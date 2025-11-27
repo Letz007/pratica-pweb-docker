@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import bd from "./src/models/index.js";
+import redis from "./src/config/redis.js";
+
 
 dotenv.config();
 
@@ -27,9 +29,32 @@ app.get("/", (req, res) => {
 });
 
 app.get("/tasks", async (req, res) => {
-  const tasks = await Task.findAll();
-  res.json(tasks);
+  try {
+    const cacheKey = "tasks:all";
+
+    // 🔵 1 — Busca no cache
+    const cached = await redis.get(cacheKey);
+
+    if (cached) {
+      console.log("CACHE HIT");
+      return res.json(JSON.parse(cached));
+    }
+
+    // 🔴 2 — Cache MISS → busca no DB
+    console.log("CACHE MISS");
+    const tasks = await Task.findAll();
+
+    // 🟢 3 — Salva no cache (expira em 60s)
+    await redis.set(cacheKey, JSON.stringify(tasks), "EX", 60);
+
+    return res.json(tasks);
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Erro ao buscar tarefas" });
+  }
 });
+
 
 app.post("/tasks", async (req, res) => {
   const { description } = req.body;
