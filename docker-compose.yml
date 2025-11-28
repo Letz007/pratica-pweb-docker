@@ -50,6 +50,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: backend-pweb
+    volumes:
+      # Use a sintaxe de caminho do Windows ou de host
+      - C:\Users\letic\pratica-pweb-docker\backend:/app
     environment:
       NODE_ENV: production
       PORT: 3000

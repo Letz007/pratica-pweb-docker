@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import bd from "./src/models/index.js";
 import redis from "./src/config/redis.js";
+import authRoutes from "./src/routes/auth.js";
 
 dotenv.config();
 
@@ -23,6 +24,7 @@ const app = express();
 const port = 3000;
 
 app.use(express.json());
+app.use("/", authRoutes);
 app.use(cors());
 
 //
