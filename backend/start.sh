@@ -66,7 +66,7 @@ fi
 unset PGPASSWORD
 
 echo "Executando migrations..."
-NODE_ENV=${NODE_ENV:-production} npx sequelize-cli db:migrate
+NODE_ENV=${NODE_ENV:-production} npx sequelize-cli db:migrate --config src/config/config.cjs --migrations-path src/migrations --models-path src/models
 
 if [ $? -eq 0 ]; then
   echo "✓ Migrations executadas com sucesso!"
