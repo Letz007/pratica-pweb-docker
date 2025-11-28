@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -8,13 +8,17 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/contexts/AuthContext';
-import { updateProfile, getProfile } from '@/api/auth';
-import { Loader2, User, Edit3, Save, X } from 'lucide-react';
+import { updateProfile, getProfile, uploadProfileImage } from '@/api/auth';
+import { Loader2, User, Edit3, Save, X, Upload } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
+import { supabase } from '@/lib/supabase';
+import { SupabaseTest } from '@/components/SupabaseTest';
 
 const profileSchema = z.object({
   name: z.string().min(2, 'Nome deve ter pelo menos 2 caracteres'),
   email: z.string().email('Email inválido'),
-  photo: z.string().url('URL da foto inválida').optional().or(z.literal('')),
+  photo: z.string().optional(),
 });
 
 type ProfileFormData = z.infer<typeof profileSchema>;
@@ -22,12 +26,18 @@ type ProfileFormData = z.infer<typeof profileSchema>;
 const Profile = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isFirstEdit, setIsFirstEdit] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { user, tokens, updateUser } = useAuth();
 
   const {
     register,
     handleSubmit,
     reset,
+    watch,
+    getValues,
+    setValue,
     formState: { errors },
   } = useForm<ProfileFormData>({
     resolver: zodResolver(profileSchema),
@@ -39,29 +49,126 @@ const Profile = () => {
   });
 
   useEffect(() => {
+    console.log('Usuário atualizado:', user);
     if (user) {
+        let photoUrl = user.photo;
+      if (!photoUrl) {
+        try {
+          const storedUser = localStorage.getItem('user');
+          if (storedUser) {
+            const parsedUser = JSON.parse(storedUser);
+            if (parsedUser.photo) {
+              photoUrl = parsedUser.photo;
+              updateUser({ ...user, photo: photoUrl });
+            }
+          }
+        } catch (error) {
+          console.error('Erro ao carregar foto do localStorage:', error);
+        }
+      }
+      
+      console.log('Atualizando formulário com dados do usuário:', {
+        name: user.name,
+        email: user.email,
+        photo: photoUrl || ''
+      });
+      
       reset({
         name: user.name,
         email: user.email,
-        photo: user.photo || '',
+        photo: photoUrl || '',
       });
     }
   }, [user, reset]);
 
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user?.id) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      console.error('O arquivo é muito grande. O tamanho máximo permitido é 5MB.');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      console.log('Iniciando upload do arquivo:', file.name);
+      
+      const fileExt = file.name.split('.').pop();
+      const fileName = `avatar.${fileExt}`;
+      
+      const filePath = `user_${user.id}/${fileName}`;
+
+      console.log('Enviando arquivo para o caminho:', filePath);
+      
+      try {
+        await supabase.storage
+          .from('profile-pictures')
+          .remove([`user_${user.id}/avatar.*`]);
+      } catch (error) {
+        console.log('Nenhuma imagem anterior para remover ou erro ao remover:', error);
+      }
+      
+      const { data: uploadData, error: uploadError } = await uploadProfileImage(filePath, file);
+      
+      if (uploadError) {
+        console.error('Erro ao fazer upload:', uploadError);
+        throw uploadError;
+      }
+      
+      console.log('Upload concluído com sucesso:', uploadData);
+      
+      const { data: { publicUrl } } = supabase.storage
+        .from('profile-pictures')
+        .getPublicUrl(filePath, {
+          download: false
+        });
+      
+      const timestamp = new Date().getTime();
+      const cachedPublicUrl = `${publicUrl}?t=${timestamp}`;
+      
+      console.log('URL pública da imagem:', cachedPublicUrl);
+      
+      setValue('photo', cachedPublicUrl, { shouldValidate: true });
+      updateUser({ ...user, photo: cachedPublicUrl });
+      
+      console.log('Foto de perfil atualizada com sucesso!');
+      
+    } catch (error) {
+      console.error('Erro ao fazer upload da imagem:', error);
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      setIsUploading(false);
+    }
+  };
+
   const onSubmit = async (data: ProfileFormData) => {
     setIsLoading(true);
     try {
-      // TEMPORÁRIO: Mockar atualização para teste
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simular delay
+      const photoUrl = data.photo || user?.photo || '';
       
       const updatedUser = {
-        id: user?.id || '1',
+        id: user?.id || '',
         name: data.name,
         email: data.email,
-        photo: data.photo || ''
+        photo: photoUrl
       };
       
+      await updateProfile(tokens?.accessToken || '', {
+        name: updatedUser.name,
+        email: updatedUser.email,
+        photo: updatedUser.photo
+      });
+      
       updateUser(updatedUser);
+      
+      if (photoUrl) {
+        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        localStorage.setItem('user', JSON.stringify({ ...userData, photo: photoUrl }));
+      }
+      
       setIsEditing(false);
     } catch (error) {
       console.error('Erro ao atualizar perfil:', error);
@@ -77,6 +184,42 @@ const Profile = () => {
       photo: user?.photo || '',
     });
     setIsEditing(false);
+    setIsFirstEdit(true);
+  };
+
+  useEffect(() => {
+    if (isEditing && isFirstEdit) {
+      console.log('Primeira vez editando, ativando input de arquivo...');
+      const timer = setTimeout(() => {
+        console.log('Tentando acionar o input de arquivo...');
+        console.log('fileInputRef.current:', fileInputRef.current);
+        if (fileInputRef.current) {
+          console.log('Chamando click() no input de arquivo');
+          fileInputRef.current.click();
+        } else {
+          console.error('fileInputRef.current é null ou undefined');
+        }
+        setIsFirstEdit(false);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isEditing, isFirstEdit]);
+
+  const handleEditClick = (e: React.MouseEvent) => {
+    e?.stopPropagation?.();
+    console.log('Botão Editar clicado');
+    setIsEditing(true);
+    
+    const timer = setTimeout(() => {
+      if (fileInputRef.current) {
+        console.log('Disparando clique no input de arquivo');
+        fileInputRef.current.click();
+      } else {
+        console.error('fileInputRef.current é nulo');
+      }
+    }, 100);
+    
+    return () => clearTimeout(timer);
   };
 
   const getInitials = (name: string) => {
@@ -143,18 +286,52 @@ const Profile = () => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="photo">URL da Foto</Label>
-                <Input
-                  id="photo"
-                  type="url"
-                  placeholder="https://exemplo.com/foto.jpg"
-                  {...register('photo')}
-                  disabled={!isEditing}
-                  className={errors.photo ? 'border-red-500' : ''}
-                />
-                {errors.photo && (
-                  <p className="text-sm text-red-500">{errors.photo.message}</p>
-                )}
+                <Label>Foto do Perfil</Label>
+                <div className="flex items-center space-x-4">
+                  <Avatar className="h-20 w-20">
+                    <AvatarImage src={watch('photo')} alt={watch('name') || 'Usuário'} />
+                    <AvatarFallback className="text-lg">
+                      {watch('name') ? getInitials(watch('name')) : <User className="h-8 w-8" />}
+                    </AvatarFallback>
+                  </Avatar>
+                  {/* File input - always in the DOM but conditionally styled */}
+                  <div className={`space-y-2 ${!isEditing ? 'hidden' : ''}`}>
+                    <input
+                      id="profile-image-upload"
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileChange}
+                      accept="image/*"
+                      className="hidden"
+                      disabled={isUploading}
+                    />
+                    <Button
+                      id="upload-button"
+                      type="button"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fileInputRef.current?.click();
+                      }}
+                      disabled={isUploading}
+                      className="flex items-center space-x-2"
+                    >
+                      {isUploading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
+                      <span>{isUploading ? 'Enviando...' : 'Escolher Imagem'}</span>
+                    </Button>
+                    <p className="text-xs text-gray-500">Formatos: JPG, PNG, GIF (máx. 5MB)</p>
+                  </div>
+                  {!isEditing && (
+                    <p className="text-sm text-gray-500">
+                      Clique em Editar para alterar a foto
+                    </p>
+                  )}
+                </div>
+                <input type="hidden" {...register('photo')} />
               </div>
 
               {/* Action Buttons */}
@@ -162,7 +339,10 @@ const Profile = () => {
                 {!isEditing ? (
                   <Button
                     type="button"
-                    onClick={() => setIsEditing(true)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditClick(e);
+                    }}
                     className="flex items-center space-x-2"
                   >
                     <Edit3 className="h-4 w-4" />
@@ -203,6 +383,7 @@ const Profile = () => {
           </CardContent>
         </Card>
       </div>
+     
     </div>
   );
 };
