@@ -1,4 +1,5 @@
 import { showSuccess, showError, showLoading, dismissToast } from "@/utils/toast";
+import { supabase, uploadProfileImage as supabaseUpload } from "@/lib/supabase";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
 
@@ -28,7 +29,7 @@ export interface ProfileUpdateRequest {
 export const login = async (email: string, password: string): Promise<LoginResponse | null> => {
   const loadingToastId = showLoading("Fazendo login...");
   try {
-    const response = await fetch(`${API_BASE_URL}/signin`, {
+    const response = await fetch(`${String(API_BASE_URL)}/signin`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -54,7 +55,7 @@ export const login = async (email: string, password: string): Promise<LoginRespo
 
 export const getProfile = async (accessToken: string): Promise<User | null> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/profile`, {
+    const response = await fetch(`${String(API_BASE_URL)}/profile`, {
       method: "GET",
       headers: {
         "Authorization": `Bearer ${accessToken}`,
@@ -80,7 +81,7 @@ export const updateProfile = async (
 ): Promise<User | null> => {
   const loadingToastId = showLoading("Atualizando perfil...");
   try {
-    const response = await fetch(`${API_BASE_URL}/profile`, {
+    const response = await fetch(`${String(API_BASE_URL)}/profile`, {
       method: "PUT",
       headers: {
         "Authorization": `Bearer ${accessToken}`,
@@ -102,5 +103,16 @@ export const updateProfile = async (
     showError("Erro ao atualizar perfil.");
     console.error("Erro ao atualizar perfil:", error);
     return null;
+  }
+};
+
+export const uploadProfileImage = async (filePath: string, file: File) => {
+  try {
+    const { data, error } = await supabaseUpload(filePath, file);
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('Erro ao fazer upload da imagem:', error);
+    return { data: null, error };
   }
 };
